@@ -40,6 +40,7 @@ pub struct VideoProvider {
     next_sync_time: Arc<Mutex<f64>>,
 
     speed: Speed,
+    stop: Arc<Mutex<bool>>,
 }
 
 impl VideoProvider {
@@ -61,6 +62,8 @@ impl VideoProvider {
             dimensions: vec![resolution.0, resolution.1, 3],
             data: None,
         }));
+
+        let stop = Arc::new(Mutex::new(false));
 
         let beat = Arc::new(Mutex::new(0.0));
         let next_sync_beat = Arc::new(Mutex::new(0.0));
@@ -88,6 +91,7 @@ impl VideoProvider {
             .expect("The sink defined in the pipeline is not an appsink");
 
         {
+            let stop = stop.clone();
             let beat = beat.clone();
             let next_sync_beat = next_sync_beat.clone();
 
@@ -99,6 +103,14 @@ impl VideoProvider {
                 gst_app::AppSinkCallbacks::new()
                     .new_sample(move |appsink| {
                         loop {
+                            if let Ok(stop) = stop.lock() {
+                                if *stop {
+                                    return Err(gst::FlowError::Error);
+                                }
+                            } else {
+                                return Err(gst::FlowError::Error);
+                            }
+
                             match speed {
                                 Speed::Beats(beat_interval) => {
                                     if let Ok(beat) = beat.lock() {
@@ -219,6 +231,7 @@ impl VideoProvider {
             beat,
             next_sync_beat,
             speed,
+            stop,
         })
     }
 
@@ -245,6 +258,9 @@ impl Drop for VideoProvider {
     fn drop(&mut self) {
         if let Err(e) = self.pipeline.set_state(State::Null) {
             eprintln!("Failed to stop video playback: {:?}", e);
+        }
+        if let Ok(mut stop) = self.stop.lock() {
+            *stop = true;
         }
     }
 }
