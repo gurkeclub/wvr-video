@@ -40,7 +40,7 @@ pub struct VideoProvider {
     next_sync_time: Arc<Mutex<f64>>,
 
     speed: Speed,
-    stop: Arc<Mutex<bool>>,
+    in_pipeline: Arc<Mutex<()>>,
 }
 
 impl VideoProvider {
@@ -63,7 +63,7 @@ impl VideoProvider {
             data: None,
         }));
 
-        let stop = Arc::new(Mutex::new(false));
+        let in_pipeline = Arc::new(Mutex::new(()));
 
         let beat = Arc::new(Mutex::new(0.0));
         let next_sync_beat = Arc::new(Mutex::new(0.0));
@@ -91,7 +91,7 @@ impl VideoProvider {
             .expect("The sink defined in the pipeline is not an appsink");
 
         {
-            let stop = stop.clone();
+            let in_pipeline = in_pipeline.clone();
             let beat = beat.clone();
             let next_sync_beat = next_sync_beat.clone();
 
@@ -102,15 +102,14 @@ impl VideoProvider {
             appsink.set_callbacks(
                 gst_app::AppSinkCallbacks::new()
                     .new_sample(move |appsink| {
-                        loop {
-                            if let Ok(stop) = stop.lock() {
-                                if *stop {
+                        let in_pipeline_lock = in_pipeline.lock();
+                        if let Err(_) =  in_pipeline_lock {
                                     return Err(gst::FlowError::Error);
-                                }
-                            } else {
-                                return Err(gst::FlowError::Error);
-                            }
-
+                            
+                        }
+                        
+                            
+                        loop {
                             match speed {
                                 Speed::Beats(beat_interval) => {
                                     if let Ok(beat) = beat.lock() {
@@ -121,11 +120,11 @@ impl VideoProvider {
                                             }
                                         } else {
                                             // The main thread most likely crashed
-                                            return Err(gst::FlowError::Error);
+                                            return Err(gst::FlowError::Eos);
                                         }
                                     } else {
                                         // The main thread most likely crashed
-                                        return Err(gst::FlowError::Error);
+                                        return Err(gst::FlowError::Eos);
                                     }
                                 }
                                 Speed::Fps(frame_rate) => {
@@ -134,7 +133,7 @@ impl VideoProvider {
                                             if *time > *next_sync_time {
                                                 *next_sync_time += 1.0 / frame_rate as f64;
                                                 break;
-                                            }
+                                            } 
                                         } else {
                                             // The main thread most likely crashed
                                             return Err(gst::FlowError::Error);
@@ -145,8 +144,9 @@ impl VideoProvider {
                                     }
                                 }
                             }
-                            thread::sleep(Duration::from_micros(10));
+                            thread::sleep(Duration::from_micros(50))
                         }
+
                         let sample = match appsink.pull_sample() {
                             Err(e) => {
                                 println!("{:}", e);
@@ -211,6 +211,8 @@ impl VideoProvider {
                                 return Err(FlowError::Error);
                             }
                         }
+
+
                         Ok(gst::FlowSuccess::Ok)
                     })
                     .build(),
@@ -231,7 +233,7 @@ impl VideoProvider {
             beat,
             next_sync_beat,
             speed,
-            stop,
+            in_pipeline,
         })
     }
 
@@ -252,16 +254,12 @@ impl VideoProvider {
             }
         }
     }
+
 }
 
 impl Drop for VideoProvider {
     fn drop(&mut self) {
-        if let Err(e) = self.pipeline.set_state(State::Null) {
-            eprintln!("Failed to stop video playback: {:?}", e);
-        }
-        if let Ok(mut stop) = self.stop.lock() {
-            *stop = true;
-        }
+        self.stop();
     }
 }
 
@@ -367,4 +365,17 @@ impl InputProvider for VideoProvider {
             }
         }
     }
+
+    fn stop(&mut self) {
+        println!("Waiting for pipeline flag");
+        let _lock = self.in_pipeline.lock();
+
+        println!("Stopping pipeline");
+        if let Err(e) = self.pipeline.set_state(State::Null) {
+            eprintln!("Failed to stop video playback: {:?}", e);
+        }
+        println!("Pipeline stopped");
+
+    }
 }
+ 
