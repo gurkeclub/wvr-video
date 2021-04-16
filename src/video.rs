@@ -100,7 +100,7 @@ impl VideoProvider {
 
             let video_buffer = video_buffer.clone();
             appsink.set_callbacks(
-                gst_app::AppSinkCallbacks::new()
+                gst_app::AppSinkCallbacks::builder()
                     .new_sample(move |appsink| {
                         let in_pipeline_lock = in_pipeline.lock();
                         if let Err(_) =  in_pipeline_lock {
