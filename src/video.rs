@@ -264,6 +264,10 @@ impl Drop for VideoProvider {
 }
 
 impl InputProvider for VideoProvider {
+    fn set_name(&mut self, name: &str) {
+        self.name = name.to_owned();
+    }
+
     fn provides(&self) -> Vec<String> {
         vec![self.name.clone()]
     }
