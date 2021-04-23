@@ -2,16 +2,14 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result};
 use image::DynamicImage;
 
-use gst;
 use gst::prelude::*;
 use gst::FlowError;
 use gst::State;
-use gst_app;
-use gst_video;
 
 use wvr_data::config::project_config::Speed;
 use wvr_data::Buffer;
@@ -33,6 +31,8 @@ pub struct VideoProvider {
     video_buffer: Arc<Mutex<Buffer>>,
     pipeline: gst::Element,
 
+    stop_lock: Arc<AtomicBool>,
+
     beat: Arc<Mutex<f64>>,
     next_sync_beat: Arc<Mutex<f64>>,
 
@@ -40,7 +40,6 @@ pub struct VideoProvider {
     next_sync_time: Arc<Mutex<f64>>,
 
     speed: Speed,
-    in_pipeline: Arc<Mutex<()>>,
 }
 
 impl VideoProvider {
@@ -63,7 +62,8 @@ impl VideoProvider {
             data: None,
         }));
 
-        let in_pipeline = Arc::new(Mutex::new(()));
+        
+        let stop_lock = Arc::new(AtomicBool::new(false));
 
         let beat = Arc::new(Mutex::new(0.0));
         let next_sync_beat = Arc::new(Mutex::new(0.0));
@@ -91,7 +91,8 @@ impl VideoProvider {
             .expect("The sink defined in the pipeline is not an appsink");
 
         {
-            let in_pipeline = in_pipeline.clone();
+            let stop_lock = stop_lock.clone();
+
             let beat = beat.clone();
             let next_sync_beat = next_sync_beat.clone();
 
@@ -102,14 +103,10 @@ impl VideoProvider {
             appsink.set_callbacks(
                 gst_app::AppSinkCallbacks::builder()
                     .new_sample(move |appsink| {
-                        let in_pipeline_lock = in_pipeline.lock();
-                        if let Err(_) =  in_pipeline_lock {
-                                    return Err(gst::FlowError::Error);
-                            
-                        }
-                        
-                            
                         loop {
+                            if stop_lock.load(Ordering::Relaxed) {
+                                    break;
+                                }
                             match speed {
                                 Speed::Beats(beat_interval) => {
                                     if let Ok(beat) = beat.lock() {
@@ -146,10 +143,11 @@ impl VideoProvider {
                             }
                             thread::sleep(Duration::from_micros(50))
                         }
+                        
 
                         let sample = match appsink.pull_sample() {
                             Err(e) => {
-                                println!("{:}", e);
+                                eprintln!("{:}", e);
                                 return Err(gst::FlowError::Eos);
                             }
                             Ok(sample) => sample,
@@ -158,24 +156,28 @@ impl VideoProvider {
                         let sample_caps = if let Some(sample_caps) = sample.get_caps() {
                             sample_caps
                         } else {
+                            
                             return Err(gst::FlowError::Error);
                         };
 
                         let video_info = if let Ok(video_info) = gst_video::VideoInfo::from_caps(sample_caps) {
                             video_info
                         } else {
+                            
                             return Err(gst::FlowError::Error);
                         };
 
                         let buffer = if let Some(buffer) = sample.get_buffer() {
                             buffer
                         } else {
+                            
                             return Err(gst::FlowError::Error);
                         };
 
                         let map = if let Ok(map) = buffer.map_readable() {
                             map
                         } else {
+                            
                             return Err(gst::FlowError::Error);
                         };
 
@@ -187,7 +189,7 @@ impl VideoProvider {
                             gst_video::VideoFormat::Bgra => TextureFormat::BGRAU8,
                             //gst_video::VideoFormat::Gray16Le => TextureFormat::RF16,
                             unsupported_format => {
-                                println!("Unsupported gstreamer format '{:?}'", unsupported_format);
+                                eprintln!("Unsupported gstreamer format '{:?}'", unsupported_format);
                                 return Err(gst::FlowError::Error);
                             }
                         };
@@ -229,11 +231,11 @@ impl VideoProvider {
             video_buffer,
             pipeline,
             time,
+            stop_lock,
             next_sync_time,
             beat,
             next_sync_beat,
             speed,
-            in_pipeline,
         })
     }
 
@@ -377,14 +379,12 @@ impl InputProvider for VideoProvider {
     }
 
     fn stop(&mut self) {
-        println!("Waiting for pipeline flag");
-        let _lock = self.in_pipeline.lock();
-
-        println!("Stopping pipeline");
+        self.stop_lock.store(true, Ordering::Relaxed);
+        
         if let Err(e) = self.pipeline.set_state(State::Null) {
             eprintln!("Failed to stop video playback: {:?}", e);
         }
-        println!("Pipeline stopped");
+         
 
     }
 }
