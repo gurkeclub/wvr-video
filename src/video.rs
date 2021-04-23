@@ -271,6 +271,12 @@ impl InputProvider for VideoProvider {
     fn provides(&self) -> Vec<String> {
         vec![self.name.clone()]
     }
+    
+    fn set_property(&mut self, property: &str, value: &DataHolder) {
+        match (property, value) {
+            _ => eprintln!("Set_property unimplemented for {:}", property),
+        }
+    }
 
     fn get(&mut self, uniform_name: &str, invalidate: bool) -> Option<DataHolder> {
         if uniform_name == self.name {
