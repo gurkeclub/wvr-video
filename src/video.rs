@@ -39,7 +39,7 @@ pub struct VideoProvider {
     time: Arc<Mutex<f64>>,
     next_sync_time: Arc<Mutex<f64>>,
 
-    speed: Speed,
+    speed: Arc<Mutex<Speed>>,
 }
 
 impl VideoProvider {
@@ -62,6 +62,8 @@ impl VideoProvider {
             data: None,
         }));
 
+
+        let speed = Arc::new(Mutex::new(speed));
         
         let stop_lock = Arc::new(AtomicBool::new(false));
 
@@ -91,6 +93,7 @@ impl VideoProvider {
             .expect("The sink defined in the pipeline is not an appsink");
 
         {
+            let speed_mutex = speed.clone();
             let stop_lock = stop_lock.clone();
 
             let beat = beat.clone();
@@ -107,6 +110,14 @@ impl VideoProvider {
                             if stop_lock.load(Ordering::Relaxed) {
                                     break;
                                 }
+                            let speed;
+                            if let Ok(speed_mutex) = speed_mutex.lock() {
+                                speed = speed_mutex.to_owned();
+                            } else {
+                                // The main thread most likely crashed
+                                return Err(gst::FlowError::Eos);
+                            }
+
                             match speed {
                                 Speed::Beats(beat_interval) => {
                                     if let Ok(beat) = beat.lock() {
@@ -276,6 +287,12 @@ impl InputProvider for VideoProvider {
     
     fn set_property(&mut self, property: &str, value: &DataHolder) {
         match (property, value) {
+            ("speed_beats", DataHolder::Float(new_speed)) => if let Ok(mut speed) = self.speed.lock() {
+                *speed = Speed::Beats(*new_speed);
+            }
+            ("speed_fps", DataHolder::Float(new_speed)) => if let Ok(mut speed) = self.speed.lock() {
+                *speed = Speed::Fps(*new_speed);
+            }
             _ => eprintln!("Set_property unimplemented for {:}", property),
         }
     }
@@ -319,7 +336,14 @@ impl InputProvider for VideoProvider {
         }
 
         if sync {
-            if let Speed::Beats(_) = self.speed {
+            let speed;
+            if let Ok(speed_mutex) = self.speed.lock() {
+                speed = speed_mutex.to_owned();
+            } else {
+                return;
+            }
+
+            if let Speed::Beats(_) = speed {
                 let wait_for_sync = if let Ok(next_sync_beat) = self.next_sync_beat.lock() {
                     beat > *next_sync_beat
                 } else {
@@ -353,7 +377,14 @@ impl InputProvider for VideoProvider {
         }
 
         if sync {
-            if let Speed::Fps(_) = self.speed {
+            let speed;
+            if let Ok(speed_mutex) = self.speed.lock() {
+                speed = speed_mutex.to_owned();
+            } else {
+                return;
+            }
+
+            if let Speed::Fps(_) = speed {
                 let wait_for_sync = if let Ok(next_sync_time) = self.next_sync_time.lock() {
                     time > *next_sync_time
                 } else {
