@@ -119,11 +119,11 @@ impl VideoProvider {
                             }
 
                             match speed {
-                                Speed::Beats(beat_interval) => {
+                                Speed::Fpb(frames_per_beat) => {
                                     if let Ok(beat) = beat.lock() {
                                         if let Ok(mut next_sync_beat) = next_sync_beat.lock() {
                                             if *beat > *next_sync_beat {
-                                                *next_sync_beat += beat_interval as f64;
+                                                *next_sync_beat += 1.0 / (frames_per_beat as f64);
                                                 break;
                                             }
                                         } else {
@@ -139,7 +139,7 @@ impl VideoProvider {
                                     if let Ok(time) = time.lock() {
                                         if let Ok(mut next_sync_time) = next_sync_time.lock() {
                                             if *time > *next_sync_time {
-                                                *next_sync_time += 1.0 / frame_rate as f64;
+                                                *next_sync_time += 1.0 / (frame_rate as f64);
                                                 break;
                                             } 
                                         } else {
@@ -287,8 +287,8 @@ impl InputProvider for VideoProvider {
     
     fn set_property(&mut self, property: &str, value: &DataHolder) {
         match (property, value) {
-            ("speed_beats", DataHolder::Float(new_speed)) => if let Ok(mut speed) = self.speed.lock() {
-                *speed = Speed::Beats(*new_speed);
+            ("speed_fpb", DataHolder::Float(new_speed)) => if let Ok(mut speed) = self.speed.lock() {
+                *speed = Speed::Fpb(*new_speed);
             }
             ("speed_fps", DataHolder::Float(new_speed)) => if let Ok(mut speed) = self.speed.lock() {
                 *speed = Speed::Fps(*new_speed);
@@ -343,7 +343,7 @@ impl InputProvider for VideoProvider {
                 return;
             }
 
-            if let Speed::Beats(_) = speed {
+            if let Speed::Fpb(_) = speed {
                 let wait_for_sync = if let Ok(next_sync_beat) = self.next_sync_beat.lock() {
                     beat > *next_sync_beat
                 } else {
