@@ -31,6 +31,7 @@ pub struct VideoProvider {
     video_buffer: Arc<Mutex<Buffer>>,
     pipeline: gst::Element,
 
+    playing_lock: Arc<AtomicBool>,
     stop_lock: Arc<AtomicBool>,
 
     beat: Arc<Mutex<f64>>,
@@ -43,7 +44,7 @@ pub struct VideoProvider {
 }
 
 impl VideoProvider {
-    pub fn new(path: &str, name: String, resolution: (usize, usize), speed: Speed) -> Result<Self> {
+    pub fn new(path: &str, name: String, resolution: (usize, usize), speed: Speed, start_beat: f64, start_time: f64, start_playing: bool) -> Result<Self> {
         gst::init().expect("Failed to initialize the gstreamer library");
         let path = if path.starts_with("http") {
             path.to_owned()
@@ -65,13 +66,14 @@ impl VideoProvider {
 
         let speed = Arc::new(Mutex::new(speed));
         
+        let playing_lock = Arc::new(AtomicBool::new(start_playing));
         let stop_lock = Arc::new(AtomicBool::new(false));
 
-        let beat = Arc::new(Mutex::new(0.0));
-        let next_sync_beat = Arc::new(Mutex::new(0.0));
+        let beat = Arc::new(Mutex::new(start_beat));
+        let next_sync_beat = Arc::new(Mutex::new(start_beat));
 
-        let time = Arc::new(Mutex::new(0.0));
-        let next_sync_time = Arc::new(Mutex::new(0.0));
+        let time = Arc::new(Mutex::new(start_time));
+        let next_sync_time = Arc::new(Mutex::new(start_time));
 
         let pipeline_string = format!(
             "uridecodebin uri={} ! videoconvert ! videoscale ! video/x-raw,format=RGB,format=RGBA,format=BGR,format=BGRA,width={:},height={:} ! videoflip method=vertical-flip ! appsink name=appsink async=false sync=false",
@@ -95,6 +97,7 @@ impl VideoProvider {
         {
             let speed_mutex = speed.clone();
             let stop_lock = stop_lock.clone();
+            let playing_lock = playing_lock.clone();
 
             let beat = beat.clone();
             let next_sync_beat = next_sync_beat.clone();
@@ -110,6 +113,9 @@ impl VideoProvider {
                             if stop_lock.load(Ordering::Relaxed) {
                                     break;
                                 }
+                                if !playing_lock.load(Ordering::Relaxed) {
+                                        break;
+                                    }
                             let speed;
                             if let Ok(speed_mutex) = speed_mutex.lock() {
                                 speed = speed_mutex.to_owned();
@@ -232,10 +238,12 @@ impl VideoProvider {
             );
         }
 
-        pipeline.set_state(State::Playing).context(format!(
-            "Failed to start gstreamer pipeline for video {:?}",
-            path
-        ))?;
+        if start_playing {
+            pipeline.set_state(State::Playing).context(format!(
+                "Failed to start gstreamer pipeline for video {:?}",
+                path
+            ))?;
+        }
 
         Ok(Self {
             name,
@@ -243,6 +251,7 @@ impl VideoProvider {
             pipeline,
             time,
             stop_lock,
+            playing_lock,
             next_sync_time,
             beat,
             next_sync_beat,
@@ -272,7 +281,9 @@ impl VideoProvider {
 
 impl Drop for VideoProvider {
     fn drop(&mut self) {
-        self.stop();
+        if let Err(e) = self.stop() {
+            eprintln!("{:?}", e);
+        }
     }
 }
 
@@ -409,14 +420,37 @@ impl InputProvider for VideoProvider {
         }
     }
 
-    fn stop(&mut self) {
+    fn stop(&mut self) -> Result<()>{
         self.stop_lock.store(true, Ordering::Relaxed);
         
-        if let Err(e) = self.pipeline.set_state(State::Null) {
-            eprintln!("Failed to stop video playback: {:?}", e);
-        }
+        self.pipeline.set_state(State::Null).context("Failed to stop video playback")?;
          
 
+        Ok(())
+    }
+    fn play(&mut self) -> Result<()>{
+        self.playing_lock.store(true, Ordering::Relaxed);
+
+        if let (Ok(mut next_sync_beat), Ok(beat)) = (self.next_sync_beat.lock(), self.beat.lock()) {
+            *next_sync_beat = *beat;
+        }
+        
+        if let (Ok(mut next_sync_time), Ok(time)) = (self.next_sync_time.lock(), self.time.lock()) {
+            *next_sync_time = *time;
+        }
+        
+        self.pipeline.set_state(State::Playing).context("Failed to resume video playback")?;
+         
+        Ok(())
+
+    }
+    fn pause(&mut self) -> Result<()>{
+        self.playing_lock.store(false, Ordering::Relaxed);
+        
+        self.pipeline.set_state(State::Paused).context("Failed to pause video playback")?;
+         
+
+        Ok(())
     }
 }
  
