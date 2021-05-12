@@ -5,4 +5,5 @@ extern crate gstreamer_video as gst_video;
 extern crate image;
 extern crate wvr_data;
 
+pub mod encoder;
 pub mod video;
