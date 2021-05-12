@@ -1,6 +1,6 @@
 [package]
 name = "wvr-video"
-version = "0.1.8"
+version = "0.1.9"
 authors = ["gurke.club <contact@gurke.club>"]
 edition = "2018"
 
