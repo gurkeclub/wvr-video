@@ -5,6 +5,7 @@ use std::time::Duration;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result};
+use url::Url;
 use image::DynamicImage;
 
 use gst::prelude::*;
@@ -45,6 +46,8 @@ pub struct VideoProvider {
 
 impl VideoProvider {
     pub fn new(path: &str, name: String, resolution: (usize, usize), speed: Speed, start_beat: f64, start_time: f64, start_playing: bool) -> Result<Self> {
+       
+       
         gst::init().expect("Failed to initialize the gstreamer library");
         let path = if path.starts_with("http") {
             path.to_owned()
@@ -55,8 +58,10 @@ impl VideoProvider {
                 path.to_owned()
             };
 
-            format!("file:///{}", path)
+            Url::from_file_path(path).unwrap().as_str().to_string()
         };
+
+
 
         let video_buffer = Arc::new(Mutex::new(Buffer {
             dimensions: vec![resolution.0, resolution.1, 3],

@@ -1,14 +1,19 @@
 [package]
 name = "wvr-video"
-version = "0.1.10"
+version = "0.1.11"
 authors = ["gurke.club <contact@gurke.club>"]
 edition = "2018"
 
 [dependencies]
 anyhow = "1.0"
+url = "2.2"
+
 gstreamer = "0.16"
 gstreamer-app = "0.16"
 gstreamer-audio = "0.16"
 gstreamer-video = "0.16"
 image = "0.23"
+
+
+
 wvr-data = {git = "https://github.com/gurkeclub/wvr-data.git", branch="main"}
