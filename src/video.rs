@@ -12,10 +12,10 @@ use gst::prelude::*;
 use gst::FlowError;
 use gst::State;
 
-use wvr_data::config::project_config::Speed;
-use wvr_data::Buffer;
-use wvr_data::DataHolder;
-use wvr_data::InputProvider;
+use wvr_data::types::Speed;
+use wvr_data::types::Buffer;
+use wvr_data::types::DataHolder;
+use wvr_data::types::InputProvider;
 
 type BgrImage = image::ImageBuffer<image::Bgr<u8>, Vec<u8>>;
 type BgraImage = image::ImageBuffer<image::Bgra<u8>, Vec<u8>>;
@@ -318,17 +318,14 @@ impl InputProvider for VideoProvider {
             self.check_loop();
 
             if let Ok(mut video_buffer) = self.video_buffer.lock() {
-                let result = if let Some(ref data) = video_buffer.data {
-                    Some(DataHolder::Texture((
+                let result = video_buffer.data.as_ref().map(|data| {
+                    DataHolder::Texture((
                         (
                             video_buffer.dimensions[0] as u32,
                             video_buffer.dimensions[1] as u32,
                         ),
                         data.to_vec(),
-                    )))
-                } else {
-                    None
-                };
+                    ))});
 
                 if invalidate {
                     video_buffer.data = None;
